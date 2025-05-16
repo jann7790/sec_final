@@ -233,8 +233,10 @@ jobs:
           mkdir -p $(pwd)/zap-output/rules/
           cat > $(pwd)/zap-output/rules/rules.tsv << 'EOL'
 
+EOL
           
           # Run ZAP baseline scan with proper volume mounting and options
+          echo "Starting ZAP scan with verbose output..."
           docker run --rm \
             -v "$(pwd)/zap-output:/zap/wrk:rw" \
             -v "$(pwd)/zap-output/rules:/zap/rules:ro" \
@@ -247,21 +249,35 @@ jobs:
             -w /zap/wrk/report_md.md \
             -r /zap/wrk/report_html.html \
             -c /zap/rules/rules.tsv \
-            -z "-config auth.loginurl=http://localhost:8080/login" \
-            -a -j
+            -a -j -d -P 443 -s
+          
+          # Debug: List files in zap-output
+          echo "Files in zap-output directory:"
+          ls -la zap-output/
           
           # Copy reports for artifact upload
-          cp zap-output/report_json.json . || touch report_json.json
-          cp zap-output/report_md.md . || touch report_md.md
-          cp zap-output/report_html.html . || touch report_html.html
+          echo "Copying reports from zap-output..."
+          cp zap-output/report_json.json . || echo "Failed to copy report_json.json - creating empty file" && touch report_json.json
+          cp zap-output/report_md.md . || echo "Failed to copy report_md.md - creating empty file" && touch report_md.md
+          cp zap-output/report_html.html . || echo "Failed to copy report_html.html - creating empty file" && touch report_html.html
 
       - name: Create ZAP scan summary
         run: |
           echo "# Dynamic Application Security Test Findings" > zap-summary.md
+          
+          # Debug: List all files in current directory
+          echo "Files in current directory:"
+          ls -la
+          
+          echo "Content of report_json.json (if exists):"
           if [ -f "report_json.json" ]; then
+            cat report_json.json | head -50
             echo "Issues found during dynamic application scanning:" >> zap-summary.md
-            jq -r '.site[0].alerts[] | "## \(.name)\n- Risk: \(.riskdesc)\n- Description: \(.desc)\n- Solution: \(.solution)\n"' report_json.json >> zap-summary.md 2>/dev/null || echo "Error parsing ZAP results" >> zap-summary.md
+            # Try to parse the JSON file with jq, but create a basic summary if that fails
+            jq -r '.site[0].alerts[] | "## \(.name)\n- Risk: \(.riskdesc)\n- Description: \(.desc)\n- Solution: \(.solution)\n"' report_json.json >> zap-summary.md 2>/dev/null || 
+            echo "Error parsing ZAP results with jq. Basic summary:" >> zap-summary.md
           else
+            echo "report_json.json file not found" >> zap-summary.md
             echo "No issues found during dynamic application scanning, or ZAP report not generated correctly." >> zap-summary.md
           fi
 
