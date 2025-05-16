@@ -233,7 +233,6 @@ jobs:
           mkdir -p $(pwd)/zap-output/rules/
           cat > $(pwd)/zap-output/rules/rules.tsv << 'EOL'
 
-EOL
           
           # Run ZAP baseline scan with proper volume mounting and options
           echo "Starting ZAP scan with verbose output..."
