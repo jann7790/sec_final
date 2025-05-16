@@ -227,9 +227,7 @@ jobs:
           allow_issue_writing: true
           # Add Docker parameters to fix permission issues
           docker_params: '--user root:root'
-          # Specify a valid artifact name
-          artifact_name: 'zapresults'
-      
+          
       - name: Create ZAP scan summary
         run: |
           echo "# Dynamic Application Security Test Findings" > zap-summary.md
