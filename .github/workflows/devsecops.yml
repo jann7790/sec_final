@@ -258,11 +258,7 @@ jobs:
           
           # Create a rule config file with some basic rules to ignore
           mkdir -p $(pwd)/zap-output/rules/
-          cat > $(pwd)/zap-output/rules/rules.tsv << 'EOL'
-10016	IGNORE	WARN	This rule (cookies without httpOnly flag) is ignored
-10020	IGNORE	WARN	X-Frame-Options header not set
-10063	IGNORE	WARN	Feature Policy header not set
-EOL
+          echo -e "10016\\tIGNORE\\tWARN\\tThis rule (cookies without httpOnly flag) is ignored\\n10020\\tIGNORE\\tWARN\\tX-Frame-Options header not set\\n10063\\tIGNORE\\tWARN\\tFeature Policy header not set" > $(pwd)/zap-output/rules/rules.tsv
           
           # Run ZAP baseline scan with proper volume mounting and options
           echo "Starting ZAP scan with verbose output..."
