@@ -260,21 +260,13 @@ jobs:
           mkdir -p $(pwd)/zap-output/rules/
           echo -e "10016\\tIGNORE\\tWARN\\tThis rule (cookies without httpOnly flag) is ignored\\n10020\\tIGNORE\\tWARN\\tX-Frame-Options header not set\\n10063\\tIGNORE\\tWARN\\tFeature Policy header not set" > $(pwd)/zap-output/rules/rules.tsv
           
-          # Create a zap.yaml file in advance
-          echo "env:" > $(pwd)/zap-output/zap.yaml
-          echo "  contexts:" >> $(pwd)/zap-output/zap.yaml
-          echo "  - name: context" >> $(pwd)/zap-output/zap.yaml
-          echo "    urls:" >> $(pwd)/zap-output/zap.yaml
-          echo "    - http://localhost:8080" >> $(pwd)/zap-output/zap.yaml
-          
           # Run ZAP baseline scan with proper volume mounting and options
           echo "Starting ZAP scan with verbose output..."
           set +e  # Don't exit on error
           docker run --rm \
             -v "$(pwd)/zap-output:/zap/wrk:rw" \
             -v "$(pwd)/zap-output/rules:/zap/rules:ro" \
-            -v "$(pwd)/zap-output/zap.yaml:/home/zap/zap.yaml:rw" \
-            -e ZAP_OUTDIR=/zap/wrk \
+            -u "$(id -u):$(id -g)" \
             --network=host \
             -t ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
@@ -283,6 +275,7 @@ jobs:
             -w /zap/wrk/report_md.md \
             -r /zap/wrk/report_html.html \
             -c /zap/rules/rules.tsv \
+            -z "-config replacer.full_list\(0\).description=authHeader \\\n                -config replacer.full_list\(0\).enabled=true \\\n                -config replacer.full_list\(0\).matchtype=REQ_HEADER \\\n                -config replacer.full_list\(0\).matchstr=Authorization \\\n                -config replacer.full_list\(0\).regex=false \\\n                -config replacer.full_list\(0\).replacement=Bearer ${{ secrets.SECURITY_TOKEN }}" \
             -I \
             -a -j -d
           
