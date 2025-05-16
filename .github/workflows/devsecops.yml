@@ -229,14 +229,14 @@ jobs:
           # Add Docker parameters to fix permission issues
           docker_params: '--user root:root'
           # Specify a valid artifact name
-          artifact_name: 'zap-scan-results'
+          artifact_name: 'zapresults'
       
       - name: Create ZAP scan summary
         run: |
           echo "# Dynamic Application Security Test Findings" > zap-summary.md
-          if [ -f "zap-report.json" ]; then
+          if [ -f "report_json.json" ]; then
             echo "Issues found during dynamic application scanning:" >> zap-summary.md
-            jq -r '.site[0].alerts[] | "## \(.name)\n- Risk: \(.riskdesc)\n- Description: \(.desc)\n- Solution: \(.solution)\n"' zap-report.json >> zap-summary.md 2>/dev/null || echo "Error parsing ZAP results" >> zap-summary.md
+            jq -r '.site[0].alerts[] | "## \(.name)\n- Risk: \(.riskdesc)\n- Description: \(.desc)\n- Solution: \(.solution)\n"' report_json.json >> zap-summary.md 2>/dev/null || echo "Error parsing ZAP results" >> zap-summary.md
           else
             echo "No issues found during dynamic application scanning, or ZAP report not generated correctly." >> zap-summary.md
           fi
@@ -252,7 +252,9 @@ jobs:
         with:
           name: dast-reports
           path: |
-            zap-report.json
+            report_json.json
+            report_md.md
+            report_html.html
             zap-summary.md
 
   # Generate a comprehensive security report from all security checks
