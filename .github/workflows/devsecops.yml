@@ -232,10 +232,7 @@ jobs:
           # Create a rule config file
           mkdir -p $(pwd)/zap-output/rules/
           cat > $(pwd)/zap-output/rules/rules.tsv << 'EOL'
-# ZAP Rules Configuration
-# Format: <rule ID>\t<PASS/FAIL/IGNORE>\t<Level>\t<Comment>
-# Example: 10016	IGNORE	WARN	This rule is ignored
-EOL
+
           
           # Run ZAP baseline scan with proper volume mounting and options
           docker run --rm \
