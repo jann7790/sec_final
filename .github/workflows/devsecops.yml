@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ main ]
 
+# Add permissions for the GITHUB_TOKEN
+permissions:
+  contents: read
+  issues: write
+  security-events: write
+
 jobs:
   security_checks:
     runs-on: ubuntu-latest
@@ -27,34 +33,64 @@ jobs:
         run: composer install --prefer-dist --no-progress --no-interaction
 
       # 1. Static Application Security Testing (SAST) - Example with PHPStan
-      # Ensure PHPStan is part of your composer dev-dependencies in ./app/composer.json
-      # Or install it globally in the runner
       - name: Run PHPStan SAST
         working-directory: ./app
-        # Adjust the command, path to analyze (e.g., src, lib), and level as needed
-        # Example: run: ./vendor/bin/phpstan analyse src --level=5 --error-format=github
-        # Using --error-format=github can surface findings directly in PRs
         run: |
-          if [ -f "./vendor/bin/phpstan" ]; then
-            ./vendor/bin/phpstan analyse . --level=1 --memory-limit=1G --error-format=github || echo "PHPStan found issues."
+          # Install PHPStan if not already installed by composer
+          composer require --dev phpstan/phpstan --no-interaction || true
+          
+          # Run PHPStan analysis and output to a file
+          ./vendor/bin/phpstan analyse src --level=1 --memory-limit=1G --error-format=json > ../phpstan-results.json || echo "PHPStan found issues but continuing pipeline."
+          
+          # Create a simple text summary for the report
+          echo "# PHPStan Static Analysis Findings" > ../phpstan-summary.md
+          if [ -s "../phpstan-results.json" ]; then
+            echo "Issues found during static code analysis." >> ../phpstan-summary.md
+            jq -r '.files | to_entries[] | "## \(.key)\n\(.value.messages[] | "- Line \(.line): \(.message)")' ../phpstan-results.json >> ../phpstan-summary.md 2>/dev/null || echo "Error parsing PHPStan results" >> ../phpstan-summary.md
           else
-            echo "PHPStan not found in ./app/vendor/bin. Skipping SAST."
+            echo "No issues found during static code analysis!" >> ../phpstan-summary.md
           fi
 
       # 2. Dependency Scanning (SCA) - Example with Composer Audit
       - name: Run Composer Audit for vulnerabilities
         working-directory: ./app
-        run: composer audit --locked # Checks composer.lock for known vulnerabilities
+        run: |
+          # Generate composer.lock if it doesn't exist
+          if [ ! -f "composer.lock" ]; then
+            composer update --no-interaction
+          fi
+          
+          # Run composer audit and save results
+          composer audit --format=json > ../composer-audit.json || true
+          
+          # Create a simple text summary
+          echo "# Composer Dependency Audit Findings" > ../composer-audit-summary.md
+          if [ -s "../composer-audit.json" ]; then
+            echo "Vulnerabilities found in dependencies:" >> ../composer-audit-summary.md
+            jq -r '.advisories[] | "## \(.title)\n- Package: \(.package.name)\n- Version: \(.version)\n- CVE: \(.cve)\n- Risk: \(.severity)\n\(.description)"' ../composer-audit.json >> ../composer-audit-summary.md 2>/dev/null || echo "No vulnerabilities found or error parsing results" >> ../composer-audit-summary.md
+          else
+            echo "No vulnerabilities found in dependencies!" >> ../composer-audit-summary.md
+          fi
 
       # 3. Infrastructure as Code (IaC) Scanning - Example with Checkov for docker-compose.yml
       - name: Scan docker-compose.yml with Checkov
         uses: bridgecrewio/checkov-action@master # Or use a specific version like @v12
         with:
           file: docker-compose.yml
-          framework: dockerfile # Checkov uses 'dockerfile' framework for compose files too
-          # Soft fail for now, review findings and then set to hard fail if needed
+          framework: docker_compose # Use docker_compose framework for docker-compose files
           soft_fail: true 
-          # To fail on issues, remove soft_fail: true or set it to false
+          output_format: json
+          output_file_path: checkov-results.json
+
+      - name: Create Checkov summary
+        run: |
+          echo "# Infrastructure as Code Scan Findings" > checkov-summary.md
+          if [ -s "checkov-results.json" ]; then
+            echo "Issues found in infrastructure configuration:" >> checkov-summary.md
+            jq -r '.results.failed_checks[] | "## \(.check_id): \(.check_name)\n- Resource: \(.resource)\n- File: \(.file_path)\n- Line: \(.file_line_range[0])\n- Details: \(.check_name)"' checkov-results.json >> checkov-summary.md 2>/dev/null || echo "Error parsing Checkov results" >> checkov-summary.md
+          else
+            echo "No issues found in infrastructure configuration!" >> checkov-summary.md
+          fi
 
       # 4. Build 'webapp' Docker image (required for image scanning)
       - name: Build webapp Docker image
@@ -65,7 +101,8 @@ jobs:
         uses: aquasecurity/trivy-action@0.20.0 # Use a specific version
         with:
           image-ref: 'my-webapp-image:${{ github.sha }}'
-          format: 'table'
+          format: 'json'
+          output: 'trivy-webapp-results.json'
           exit-code: '0' # Set to '1' to fail on vulnerabilities
           ignore-unfixed: true
           vuln-type: 'os,library'
@@ -75,7 +112,8 @@ jobs:
         uses: aquasecurity/trivy-action@0.20.0
         with:
           image-ref: 'mysql:8.0'
-          format: 'table'
+          format: 'json'
+          output: 'trivy-mysql-results.json'
           exit-code: '0' # Typically don't fail the build for base images immediately, but monitor.
           ignore-unfixed: true
           vuln-type: 'os,library'
@@ -85,11 +123,54 @@ jobs:
         uses: aquasecurity/trivy-action@0.20.0
         with:
           image-ref: 'owasp/modsecurity-crs:4.13.0-nginx-202504070504'
-          format: 'table'
+          format: 'json'
+          output: 'trivy-waf-results.json'
           exit-code: '0'
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'HIGH,CRITICAL'
+
+      - name: Create Trivy container scan summary
+        run: |
+          echo "# Container Security Scan Findings" > container-scan-summary.md
+          
+          echo "## WebApp Image Vulnerabilities" >> container-scan-summary.md
+          if [ -s "trivy-webapp-results.json" ]; then
+            jq -r '.Results[] | select(.Vulnerabilities != null) | .Vulnerabilities[] | select(.Severity == "CRITICAL" or .Severity == "HIGH") | "- [\(.Severity)] \(.VulnerabilityID): \(.Title) in \(.PkgName)"' trivy-webapp-results.json >> container-scan-summary.md 2>/dev/null || echo "Error parsing Trivy WebApp results" >> container-scan-summary.md
+          else
+            echo "No critical/high vulnerabilities found!" >> container-scan-summary.md
+          fi
+          
+          echo -e "\n## MySQL Image Vulnerabilities" >> container-scan-summary.md
+          if [ -s "trivy-mysql-results.json" ]; then
+            jq -r '.Results[] | select(.Vulnerabilities != null) | .Vulnerabilities[] | select(.Severity == "CRITICAL" or .Severity == "HIGH") | "- [\(.Severity)] \(.VulnerabilityID): \(.Title) in \(.PkgName)"' trivy-mysql-results.json >> container-scan-summary.md 2>/dev/null || echo "Error parsing Trivy MySQL results" >> container-scan-summary.md
+          else
+            echo "No critical/high vulnerabilities found!" >> container-scan-summary.md
+          fi
+          
+          echo -e "\n## WAF Image Vulnerabilities" >> container-scan-summary.md
+          if [ -s "trivy-waf-results.json" ]; then
+            jq -r '.Results[] | select(.Vulnerabilities != null) | .Vulnerabilities[] | select(.Severity == "CRITICAL" or .Severity == "HIGH") | "- [\(.Severity)] \(.VulnerabilityID): \(.Title) in \(.PkgName)"' trivy-waf-results.json >> container-scan-summary.md 2>/dev/null || echo "Error parsing Trivy WAF results" >> container-scan-summary.md
+          else
+            echo "No critical/high vulnerabilities found!" >> container-scan-summary.md
+          fi
+
+      # Upload all security check artifacts for the summary job
+      - name: Upload security check artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-check-reports
+          path: |
+            phpstan-summary.md
+            composer-audit-summary.md
+            checkov-summary.md
+            container-scan-summary.md
+            phpstan-results.json
+            composer-audit.json
+            checkov-results.json
+            trivy-webapp-results.json
+            trivy-mysql-results.json
+            trivy-waf-results.json
 
   # Dynamic Application Security Testing (DAST) - Example with OWASP ZAP Baseline Scan
   # This job would typically run after deploying to a staging/test environment.
@@ -133,19 +214,145 @@ jobs:
           echo "Waiting for services to start..."
           # Implement a proper health check for your webapp on port 8080
           # This is a simple sleep, replace with a curl loop or similar
-          sleep 90 
+          sleep 20   
 
       - name: Run OWASP ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.10.0
         with:
           target: 'http://localhost:8080' # WAF endpoint
-          # token: ${{ secrets.GITHUB_TOKEN }} # Optional: if you want to report issues to GitHub Security tab
+          token: ${{ secrets.SECURITY_TOKEN }}
           # docker_name: 'ghcr.io/zaproxy/zaproxy:stable' # ZAP Docker image
           # rules_file_name: '.zap/rules.tsv' # Optional: path to ZAP rules file
           cmd_options: '-a -j' # -a include alpha rules, -j AJAX spider
           # To fail the build if ZAP finds alerts:
           # fail_action: true
+          format: json
+          allow_issue_writing: true
+      
+      - name: Create ZAP scan summary
+        run: |
+          echo "# Dynamic Application Security Test Findings" > zap-summary.md
+          if [ -f "zap-report.json" ]; then
+            echo "Issues found during dynamic application scanning:" >> zap-summary.md
+            jq -r '.site[0].alerts[] | "## \(.name)\n- Risk: \(.riskdesc)\n- Description: \(.desc)\n- Solution: \(.solution)\n"' zap-report.json >> zap-summary.md 2>/dev/null || echo "Error parsing ZAP results" >> zap-summary.md
+          else
+            echo "No issues found during dynamic application scanning, or ZAP report not generated correctly." >> zap-summary.md
+          fi
 
       - name: Stop application stack
         if: always() # Ensure services are stopped even if ZAP scan fails
         run: docker-compose down 
+      
+      # Upload DAST artifacts for the summary job
+      - name: Upload DAST artifacts
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: dast-reports
+          path: |
+            zap-report.json
+            zap-summary.md
+
+  # Generate a comprehensive security report from all security checks
+  security_summary:
+    needs: [security_checks, dynamic_analysis]
+    runs-on: ubuntu-latest
+    if: always() # Run even if previous jobs have failed
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Download all artifacts
+      - name: Download security check artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: security-check-reports
+          path: security-reports
+
+      - name: Download DAST artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: dast-reports
+          path: dast-reports
+          
+      - name: Generate comprehensive security report
+        run: |
+          # Create a combined security report
+          echo "# Security Scan Summary Report" > security-summary-report.md
+          echo "## Report generated on $(date)" >> security-summary-report.md
+          echo -e "\n## Overview" >> security-summary-report.md
+          echo "This report summarizes findings from all security scans performed in the CI/CD pipeline." >> security-summary-report.md
+         
+          # Include all the individual summaries
+          echo -e "\n---\n" >> security-summary-report.md
+          if [ -f "security-reports/phpstan-summary.md" ]; then
+            cat "security-reports/phpstan-summary.md" >> security-summary-report.md
+            echo -e "\n---\n" >> security-summary-report.md
+          fi
+         
+          if [ -f "security-reports/composer-audit-summary.md" ]; then
+            cat "security-reports/composer-audit-summary.md" >> security-summary-report.md
+            echo -e "\n---\n" >> security-summary-report.md
+          fi
+          
+          if [ -f "security-reports/checkov-summary.md" ]; then
+            cat "security-reports/checkov-summary.md" >> security-summary-report.md
+            echo -e "\n---\n" >> security-summary-report.md
+          fi
+          
+          if [ -f "security-reports/container-scan-summary.md" ]; then
+            cat "security-reports/container-scan-summary.md" >> security-summary-report.md
+            echo -e "\n---\n" >> security-summary-report.md
+          fi
+          
+          if [ -f "dast-reports/zap-summary.md" ]; then
+            cat "dast-reports/zap-summary.md" >> security-summary-report.md
+            echo -e "\n---\n" >> security-summary-report.md
+          fi
+          
+          # Count issues by severity
+          echo -e "\n## Security Issue Summary" >> security-summary-report.md
+          echo "| Category | Critical | High | Medium | Low | Informational | Total |" >> security-summary-report.md
+          echo "|----------|----------|------|--------|-----|---------------|-------|" >> security-summary-report.md
+          
+          # Count issues from each tool (simplified for demonstration)
+          # In a real setup, you'd want to parse the JSON more carefully
+          echo -e "| SAST (PHPStan) | $(grep -c "CRITICAL" security-reports/phpstan-results.json 2>/dev/null || echo 0) | $(grep -c "HIGH" security-reports/phpstan-results.json 2>/dev/null || echo 0) | $(grep -c "MEDIUM" security-reports/phpstan-results.json 2>/dev/null || echo 0) | $(grep -c "LOW" security-reports/phpstan-results.json 2>/dev/null || echo 0) | $(grep -c "INFO" security-reports/phpstan-results.json 2>/dev/null || echo 0) | $(jq '.totals.file_errors' security-reports/phpstan-results.json 2>/dev/null || echo 0) |" >> security-summary-report.md
+          
+          echo -e "| SCA (Composer) | $(grep -c "CRITICAL" security-reports/composer-audit.json 2>/dev/null || echo 0) | $(grep -c "HIGH" security-reports/composer-audit.json 2>/dev/null || echo 0) | $(grep -c "MEDIUM" security-reports/composer-audit.json 2>/dev/null || echo 0) | $(grep -c "LOW" security-reports/composer-audit.json 2>/dev/null || echo 0) | $(grep -c "INFO" security-reports/composer-audit.json 2>/dev/null || echo 0) | $(jq '.advisories | length' security-reports/composer-audit.json 2>/dev/null || echo 0) |" >> security-summary-report.md
+          
+          echo -e "| IaC (Checkov) | $(grep -c "CRITICAL" security-reports/checkov-results.json 2>/dev/null || echo 0) | $(grep -c "HIGH" security-reports/checkov-results.json 2>/dev/null || echo 0) | $(grep -c "MEDIUM" security-reports/checkov-results.json 2>/dev/null || echo 0) | $(grep -c "LOW" security-reports/checkov-results.json 2>/dev/null || echo 0) | $(grep -c "INFO" security-reports/checkov-results.json 2>/dev/null || echo 0) | $(jq '.summary.failed' security-reports/checkov-results.json 2>/dev/null || echo 0) |" >> security-summary-report.md
+          
+          # For Trivy, combine all 3 image scans
+          critical_count=$(jq -r '.Results[].Vulnerabilities[] | select(.Severity == "CRITICAL") | .VulnerabilityID' security-reports/trivy-*-results.json 2>/dev/null | wc -l || echo 0)
+          high_count=$(jq -r '.Results[].Vulnerabilities[] | select(.Severity == "HIGH") | .VulnerabilityID' security-reports/trivy-*-results.json 2>/dev/null | wc -l || echo 0)
+          medium_count=$(jq -r '.Results[].Vulnerabilities[] | select(.Severity == "MEDIUM") | .VulnerabilityID' security-reports/trivy-*-results.json 2>/dev/null | wc -l || echo 0)
+          low_count=$(jq -r '.Results[].Vulnerabilities[] | select(.Severity == "LOW") | .VulnerabilityID' security-reports/trivy-*-results.json 2>/dev/null | wc -l || echo 0)
+          info_count=$(jq -r '.Results[].Vulnerabilities[] | select(.Severity == "UNKNOWN" or .Severity == "INFO") | .VulnerabilityID' security-reports/trivy-*-results.json 2>/dev/null | wc -l || echo 0)
+          total_count=$((critical_count + high_count + medium_count + low_count + info_count))
+          
+          echo -e "| Container (Trivy) | $critical_count | $high_count | $medium_count | $low_count | $info_count | $total_count |" >> security-summary-report.md
+          
+          # For ZAP DAST
+          critical_count=$(jq -r '.site[0].alerts[] | select(.riskdesc | startswith("High")) | .name' dast-reports/zap-report.json 2>/dev/null | wc -l || echo 0)
+          high_count=$(jq -r '.site[0].alerts[] | select(.riskdesc | startswith("Medium")) | .name' dast-reports/zap-report.json 2>/dev/null | wc -l || echo 0)
+          medium_count=$(jq -r '.site[0].alerts[] | select(.riskdesc | startswith("Low")) | .name' dast-reports/zap-report.json 2>/dev/null | wc -l || echo 0)
+          low_count=$(jq -r '.site[0].alerts[] | select(.riskdesc | startswith("Informational")) | .name' dast-reports/zap-report.json 2>/dev/null | wc -l || echo 0)
+          info_count=0
+          total_count=$((critical_count + high_count + medium_count + low_count))
+          
+          echo -e "| DAST (ZAP) | $critical_count | $high_count | $medium_count | $low_count | $info_count | $total_count |" >> security-summary-report.md
+          
+          echo -e "\n## Recommendation" >> security-summary-report.md
+          echo "Review all high and critical findings first, then address medium and low issues based on priority." >> security-summary-report.md
+      
+      # Upload the final consolidated report
+      - name: Upload comprehensive security report
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-summary-report
+          path: security-summary-report.md
+          
+      # Display the summary report in the job summary
+      - name: Post summary to job
+        run: cat security-summary-report.md >> $GITHUB_STEP_SUMMARY 

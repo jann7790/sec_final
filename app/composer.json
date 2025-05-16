@@ -11,5 +11,10 @@
             "email": "jann7790@gmail.com"
         }
     ],
-    "require": {}
+    "require": {},
+    "require-dev": {
+        "phpstan/phpstan": "^1.10",
+        "squizlabs/php_codesniffer": "^3.7",
+        "phpunit/phpunit": "^10.0"
+    }
 }
