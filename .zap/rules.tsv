@@ -1,0 +1,3 @@
+# ZAP Rules Configuration
+# Format: <rule ID>\t<PASS/FAIL/IGNORE>\t<Level>\t<Comment>
+# Example: 10016	IGNORE	WARN	This rule (detecting usage of cookies without httpOnly flag) is ignored 
