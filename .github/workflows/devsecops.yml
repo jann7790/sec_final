@@ -157,7 +157,7 @@ jobs:
 
       # Upload all security check artifacts for the summary job
       - name: Upload security check artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: security-check-reports
           path: |
@@ -245,7 +245,7 @@ jobs:
       
       # Upload DAST artifacts for the summary job
       - name: Upload DAST artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: dast-reports
@@ -264,13 +264,13 @@ jobs:
 
       # Download all artifacts
       - name: Download security check artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: security-check-reports
           path: security-reports
 
       - name: Download DAST artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: dast-reports
           path: dast-reports
@@ -348,7 +348,7 @@ jobs:
       
       # Upload the final consolidated report
       - name: Upload comprehensive security report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: security-summary-report
           path: security-summary-report.md
