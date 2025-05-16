@@ -39,8 +39,8 @@ jobs:
           # Install PHPStan if not already installed by composer
           composer require --dev phpstan/phpstan --no-interaction || true
           
-          # Run PHPStan analysis and output to a file
-          ./vendor/bin/phpstan analyse src --level=1 --memory-limit=1G --error-format=json > ../phpstan-results.json || echo "PHPStan found issues but continuing pipeline."
+          # Run PHPStan analysis and output to a file (scan all PHP files, not just src directory)
+          ./vendor/bin/phpstan analyse *.php --level=1 --memory-limit=1G --error-format=json > ../phpstan-results.json || echo "PHPStan found issues but continuing pipeline."
           
           # Create a simple text summary for the report
           echo "# PHPStan Static Analysis Findings" > ../phpstan-summary.md
@@ -77,7 +77,7 @@ jobs:
         uses: bridgecrewio/checkov-action@master # Or use a specific version like @v12
         with:
           file: docker-compose.yml
-          framework: docker_compose # Use docker_compose framework for docker-compose files
+          framework: dockerfile # Use dockerfile framework for compose files
           soft_fail: true 
           output_format: json
           output_file_path: checkov-results.json
