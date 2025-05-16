@@ -77,7 +77,7 @@ jobs:
         uses: bridgecrewio/checkov-action@master # Or use a specific version like @v12
         with:
           file: docker-compose.yml
-          framework: dockerfile # Use dockerfile framework for compose files
+          framework: yaml # Try 'yaml' as the framework
           soft_fail: true 
           output_format: json
           output_file_path: checkov-results.json
