@@ -176,7 +176,6 @@ jobs:
   # This job would typically run after deploying to a staging/test environment.
   # It requires the application to be accessible via HTTP.
   dynamic_analysis:
-    needs: security_checks # Example: run DAST only if other checks pass
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
