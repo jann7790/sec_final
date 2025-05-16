@@ -220,17 +220,43 @@ jobs:
         run: |
           mkdir -p zap-output
           chmod -R 777 zap-output
+          # Create a minimal zap.yaml configuration file
+          echo "# ZAP Configuration" > zap-output/zap.yaml
 
+      # Run ZAP directly with Docker instead of the GitHub Action
       - name: Run OWASP ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.10.0
-        with:
-          target: 'http://localhost:8080' # WAF endpoint
-          token: ${{ secrets.SECURITY_TOKEN }}
-          docker_name: 'ghcr.io/zaproxy/zaproxy:stable' # ZAP Docker image
-          cmd_options: '-a -j' # -a include alpha rules, -j AJAX spider 
-          allow_issue_writing: true
-          rules_file_name: '.zap/rules.tsv'
-          artifact_name: 'dast-zap-reports' # Explicitly name the artifact
+        run: |
+          # Pull the ZAP docker image
+          docker pull ghcr.io/zaproxy/zaproxy:stable
+          
+          # Create a rule config file
+          mkdir -p $(pwd)/zap-output/rules/
+          cat > $(pwd)/zap-output/rules/rules.tsv << 'EOL'
+# ZAP Rules Configuration
+# Format: <rule ID>\t<PASS/FAIL/IGNORE>\t<Level>\t<Comment>
+# Example: 10016	IGNORE	WARN	This rule is ignored
+EOL
+          
+          # Run ZAP baseline scan with proper volume mounting and options
+          docker run --rm \
+            -v "$(pwd)/zap-output:/zap/wrk:rw" \
+            -v "$(pwd)/zap-output/rules:/zap/rules:ro" \
+            -u "$(id -u):$(id -g)" \
+            --network=host \
+            -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+            -t http://localhost:8080 \
+            -J /zap/wrk/report_json.json \
+            -w /zap/wrk/report_md.md \
+            -r /zap/wrk/report_html.html \
+            -c /zap/rules/rules.tsv \
+            -z "-config auth.loginurl=http://localhost:8080/login" \
+            -a -j
+          
+          # Copy reports for artifact upload
+          cp zap-output/report_json.json . || touch report_json.json
+          cp zap-output/report_md.md . || touch report_md.md
+          cp zap-output/report_html.html . || touch report_html.html
 
       - name: Create ZAP scan summary
         run: |
