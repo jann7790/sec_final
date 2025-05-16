@@ -107,8 +107,10 @@ jobs:
       - name: Install Docker Compose
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose-plugin
-          docker compose version
+          # Install Docker Compose v2 using the official method
+          sudo curl -SL https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          docker-compose version
           
       # You would need to handle your .env file for docker-compose here.
       # Best practice is to use GitHub Secrets for all sensitive values.
@@ -124,7 +126,7 @@ jobs:
           # Add any other variables your docker-compose.yml expects
 
       - name: Start application stack using Docker Compose
-        run: docker compose up -d
+        run: docker-compose up -d
 
       - name: Wait for services to be ready
         run: |
@@ -146,4 +148,4 @@ jobs:
 
       - name: Stop application stack
         if: always() # Ensure services are stopped even if ZAP scan fails
-        run: docker compose down 
+        run: docker-compose down 
