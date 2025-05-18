@@ -1,3 +1,7 @@
-# ZAP Rules Configuration
-# Format: <rule ID>\t<PASS/FAIL/IGNORE>\t<Level>\t<Comment>
-# Example: 10016	IGNORE	WARN	This rule (detecting usage of cookies without httpOnly flag) is ignored 
+# 創建 .zap 目錄和 rules.tsv 文件
+mkdir -p .zap
+cat > .zap/rules.tsv << EOL
+10016	IGNORE	WARN	This rule (cookies without httpOnly flag) is ignored
+10020	IGNORE	WARN	X-Frame-Options header not set
+10063	IGNORE	WARN	Feature Policy header not set
+EOL

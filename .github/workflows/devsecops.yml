@@ -13,6 +13,8 @@ permissions:
   security-events: write
 
 jobs:
+
+
   security_checks:
     runs-on: ubuntu-latest
     steps:
@@ -187,13 +189,11 @@ jobs:
       - name: Install Docker Compose
         run: |
           sudo apt-get update
-          # Install Docker Compose v2 using the official method
           sudo curl -SL https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
           sudo chmod +x /usr/local/bin/docker-compose
           docker-compose version
           
-      # You would need to handle your .env file for docker-compose here.
-      # Best practice is to use GitHub Secrets for all sensitive values.
+      # 創建包含環境變數的 .env 文件
       - name: Create .env file for Docker Compose
         run: |
           echo "DB_USER=${{ secrets.DB_USER }}" >> .env
@@ -203,19 +203,18 @@ jobs:
           echo "MYSQL_USER=${{ secrets.MYSQL_USER }}" >> .env
           echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
-          # Add any other variables your docker-compose.yml expects
 
+      # 啟動應用程式
       - name: Start application stack using Docker Compose
         run: docker-compose up -d
 
+      # 等待服務就緒
       - name: Wait for services to be ready
         run: |
           echo "Waiting for services to start..."
-          # Implement a proper health check for your webapp on port 8080
-          # This is a simple sleep, replace with a curl loop or similar
           sleep 20   
 
-      # Check if the application is actually responding
+      # 驗證應用程式是否可訪問
       - name: Verify application is accessible
         run: |
           echo "Checking if application is accessible at http://localhost:8080"
@@ -233,110 +232,25 @@ jobs:
             echo "Application is accessible, proceeding with ZAP scan."
           else
             echo "ERROR: Application at http://localhost:8080 is not accessible after $max_retries attempts."
-            echo "Listing running containers and their ports for debugging:"
             docker ps -a
-            echo "Checking ports in use:"
             netstat -tulpn | grep LISTEN
-            echo "Docker compose logs:"
             docker-compose logs --tail="200"
             exit 1
           fi
 
-      # Create a directory for ZAP results with proper permissions
-      - name: Create ZAP working directory
-        run: |
-          mkdir -p zap-output
-          chmod -R 777 zap-output
-          # Create a minimal zap.yaml configuration file
-          echo "# ZAP Configuration" > zap-output/zap.yaml
-
-      # Run ZAP directly with Docker instead of the GitHub Action
-      - name: Run OWASP ZAP Baseline Scan
-        run: |
-          # Pull the ZAP docker image
-          docker pull ghcr.io/zaproxy/zaproxy:stable
+      # 使用 ZAP Baseline 掃描動作
+      - name: ZAP Scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: 'http://localhost:8080'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a -j'
           
-          # Create a rule config file with some basic rules to ignore
-          mkdir -p $(pwd)/zap-output/rules/
-          echo -e "10016\\tIGNORE\\tWARN\\tThis rule (cookies without httpOnly flag) is ignored\\n10020\\tIGNORE\\tWARN\\tX-Frame-Options header not set\\n10063\\tIGNORE\\tWARN\\tFeature Policy header not set" > $(pwd)/zap-output/rules/rules.tsv
-          
-          # Run ZAP baseline scan with proper volume mounting and options
-          echo "Starting ZAP scan with verbose output..."
-          set +e  # Don't exit on error
-          docker run --rm \
-            -v "$(pwd)/zap-output:/zap/wrk:rw" \
-            -v "$(pwd)/zap-output/rules:/zap/rules:ro" \
-            -u "$(id -u):$(id -g)" \
-            --network=host \
-            -t ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py \
-            -t http://localhost:8080 \
-            -J /zap/wrk/report_json.json \
-            -w /zap/wrk/report_md.md \
-            -r /zap/wrk/report_html.html \
-            -c /zap/rules/rules.tsv \
-            -z "-config replacer.full_list\(0\).description=authHeader \\\n                -config replacer.full_list\(0\).enabled=true \\\n                -config replacer.full_list\(0\).matchtype=REQ_HEADER \\\n                -config replacer.full_list\(0\).matchstr=Authorization \\\n                -config replacer.full_list\(0\).regex=false \\\n                -config replacer.full_list\(0\).replacement=Bearer ${{ secrets.SECURITY_TOKEN }}" \
-            -I \
-            -a -j -d
-          
-          zap_exit=$?
-          echo "ZAP scan completed with exit code: $zap_exit"
-          set -e  # Restore exit on error
-          
-          # Debug: List files in zap-output
-          echo "Files in zap-output directory:"
-          ls -la zap-output/
-          
-          # Copy reports for artifact upload - fix the copy logic with better error handling
-          echo "Copying reports from zap-output..."
-          if [ -f "zap-output/report_json.json" ]; then
-            cp zap-output/report_json.json .
-            echo "Successfully copied report_json.json"
-          else
-            echo "report_json.json not found in zap-output - creating empty file"
-            echo "{\"site\": [{\"alerts\": []}]}" > report_json.json
-          fi
-          
-          if [ -f "zap-output/report_md.md" ]; then
-            cp zap-output/report_md.md .
-            echo "Successfully copied report_md.md"
-          else
-            echo "report_md.md not found in zap-output - creating empty file"
-            echo "# ZAP Scan Report\nNo issues found." > report_md.md
-          fi
-          
-          if [ -f "zap-output/report_html.html" ]; then
-            cp zap-output/report_html.html .
-            echo "Successfully copied report_html.html"
-          else
-            echo "report_html.html not found in zap-output - creating empty file"
-            echo "<html><body><h1>ZAP Scan Report</h1><p>No issues found.</p></body></html>" > report_html.html
-          fi
-
-      - name: Create ZAP scan summary
-        run: |
-          echo "# Dynamic Application Security Test Findings" > zap-summary.md
-          
-          # Debug: List all files in current directory
-          echo "Files in current directory:"
-          ls -la
-          
-          echo "Content of report_json.json (if exists):"
-          if [ -f "report_json.json" ]; then
-            cat report_json.json | head -50
-            echo "Issues found during dynamic application scanning:" >> zap-summary.md
-            # Try to parse the JSON file with jq, but create a basic summary if that fails
-            jq -r '.site[0].alerts[] | "## \(.name)\n- Risk: \(.riskdesc)\n- Description: \(.desc)\n- Solution: \(.solution)\n"' report_json.json >> zap-summary.md 2>/dev/null || 
-            echo "Error parsing ZAP results with jq. Basic summary:" >> zap-summary.md
-          else
-            echo "report_json.json file not found" >> zap-summary.md
-            echo "No issues found during dynamic application scanning, or ZAP report not generated correctly." >> zap-summary.md
-          fi
-
+      # 停止應用程式
       - name: Stop application stack
-        if: always() # Ensure services are stopped even if ZAP scan fails
-        run: docker-compose down 
-      
+        if: always()
+        run: docker-compose down
+
       # Upload DAST artifacts for the summary job
       - name: Upload DAST artifacts
         uses: actions/upload-artifact@v4
